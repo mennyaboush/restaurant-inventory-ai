@@ -59,6 +59,28 @@ Phase 7: Production & Polish .......... Week 9-10 (Days 60-70)
 - Moved Postgres credentials out of `docker-compose.yml` into a local `.env` file and added `.gitignore` to avoid committing secrets.
 - `docker-compose.yml` now uses `env_file: .env`. Keep real passwords out of Git and use `.env` only for local development.
 
+### Dev update (Feb 10, 2026)
+
+- Initialized a local git repository for the project and committed current files (local only).
+- Installed `golangci-lint` and added a `.golangci.yml` with recommended linters (`govet`, `staticcheck`, `errcheck`, `unused`, `gofmt`, `goimports`, `gosimple`, `gocyclo`).
+- Applied small fixes flagged by linters: explicit rollback handling in transactions, check/log `json.Encoder.Encode` errors, and removed unused demo/learning functions from `cmd/server`.
+- Added a shared test harness (`internal/repository/test/shared_tests.go`) so multiple storage providers (Postgres, SQLite, memory) can run the same integration tests.
+- Updated Postgres integration tests to use the shared harness and fixed type mismatch; integration tests now pass locally.
+
+### Quick status (Feb 10, 2026)
+
+- Unit tests: none present (packages report no test files).
+- Integration tests: `internal/repository` integration suite passes locally (`TestPostgresIntegration`, `TestPostgresStore_CRUD_and_Edges`).
+ 
+> Note: small development updates are recorded here for traceability. The roadmap and phase plan remain unchanged — follow the Phase-based tasks above as the source of truth.
+
+### Dev notes (Feb 10, 2026)
+
+- Local git repo initialized (local commit).
+- `golangci-lint` installed and configured; small linter-driven fixes applied.
+- Shared repository integration tests added and verified locally.
+
+
 ---
 
 ## Phase 0: Environment Setup 🛠️
