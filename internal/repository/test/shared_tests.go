@@ -27,6 +27,8 @@ type Store interface {
 
 // RunStoreIntegrationTests runs the common integration tests against any
 // Repository implementation supplied by newStore(db).
+//
+//nolint:gocyclo // test helper has many steps; complexity is acceptable for readability
 func RunStoreIntegrationTests(t *testing.T, newStore func(*sql.DB) Store, db *sql.DB) {
 	store := newStore(db)
 

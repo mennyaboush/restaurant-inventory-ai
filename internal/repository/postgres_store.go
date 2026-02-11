@@ -38,7 +38,7 @@ func (s *PostgresStore) AddProduct(p *models.Product) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 
 	_, err = tx.Exec(`INSERT INTO products (id, name, brand, size, container_type, box_size, price, category, is_active) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) ON CONFLICT (brand,size,container_type) DO NOTHING`, id, p.Name, p.Brand, p.Size, p.ContainerType, p.BoxSize, p.Price, p.Category, p.IsActive)
 	if err != nil {
@@ -160,7 +160,7 @@ func (s *PostgresStore) UpdateStock(productID string, boxes, units int) error {
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 
 	_, err = tx.Exec(`UPDATE stocks SET quantity_boxes = quantity_boxes + $1, quantity_units = quantity_units + $2, last_updated = CURRENT_TIMESTAMP WHERE product_id = $3`, boxes, units, productID)
 	if err != nil {

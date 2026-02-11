@@ -121,7 +121,7 @@ func prepareDBForTest(t *testing.T) *sql.DB {
 func TestPostgresStore_CRUD_and_Edges(t *testing.T) {
 	db := prepareDBForTest(t)
 	defer db.Close()
-	repostest.RunStoreIntegrationTests(t, func(db *sql.DB) Repository {
+	repostest.RunStoreIntegrationTests(t, func(db *sql.DB) repostest.Store {
 		return NewPostgresStore(db)
 	}, db)
 }

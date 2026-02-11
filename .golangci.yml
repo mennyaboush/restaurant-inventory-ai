@@ -1,0 +1,21 @@
+run:
+  timeout: 5m
+
+linters:
+  enable:
+    - govet
+    - staticcheck
+    - errcheck
+    - deadcode
+    - unused
+    - gofmt
+    - goimports
+    - gosimple
+    - gocyclo
+
+issues:
+  exclude-rules:
+    # Allow some learning/demo code if still present in cmd/server
+    - path: _/cmd/server/main.go
+      linters: [unused]
+      text: "learn"
