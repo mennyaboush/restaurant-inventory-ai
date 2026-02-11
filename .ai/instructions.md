@@ -1,4 +1,4 @@
-# AI Assistant Instructions
+git clone # AI Assistant Instructions
 
 > Universal instructions for AI assistants (Claude, ChatGPT, Copilot, Cursor)
 

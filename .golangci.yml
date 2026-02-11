@@ -6,7 +6,6 @@ linters:
     - govet
     - staticcheck
     - errcheck
-    - deadcode
     - unused
     - gofmt
     - goimports
