@@ -38,6 +38,27 @@ jobs:
         with:
           go-version: '1.25.6'
 
+      - name: Create .env.ci
+        run: |
+          cat > .env.ci <<EOF
+          POSTGRES_HOST=localhost
+          POSTGRES_PORT=5432
+          POSTGRES_USER=postgres
+          POSTGRES_PASSWORD=postgres
+          POSTGRES_DB=testdb
+          EOF
+
+      - name: Install golangci-lint (build with local Go)
+        run: |
+          go install github.com/golangci/golangci-lint/cmd/golangci-lint@v1.62.0
+          export PATH=$(go env GOPATH)/bin:$PATH
+
+      - name: Run gitleaks (secrets scan)
+        uses: zricethezav/gitleaks-action@v2
+        with:
+          args: --redact --exit-on-find
+        # note: this uses the open-source gitleaks scanner; it fails the job on findings
+
       - name: Install golangci-lint (build with local Go)
         run: |
           go install github.com/golangci/golangci-lint/cmd/golangci-lint@v1.62.0
@@ -50,16 +71,6 @@ jobs:
       - name: Wait for Postgres
         run: |
           for i in {1..30}; do pg_isready -h localhost -p 5432 && break || sleep 1; done
-
-      - name: Create .env.ci
-        run: |
-          cat > .env.ci <<EOF
-          POSTGRES_HOST=localhost
-          POSTGRES_PORT=5432
-          POSTGRES_USER=postgres
-          POSTGRES_PASSWORD=postgres
-          POSTGRES_DB=testdb
-          EOF
 
       - name: Run integration tests
         run: |
