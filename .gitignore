@@ -1,4 +1,6 @@
 .env
 .env.local
+# CI env for integration tests
+.env.ci
 # OS files
 .DS_Store

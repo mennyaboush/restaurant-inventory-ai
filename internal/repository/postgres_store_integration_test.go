@@ -22,7 +22,7 @@ func prepareDBForTest(t *testing.T) *sql.DB {
 				t.Fatalf("failed loading %s: %v", ef, err)
 			}
 		} else {
-			t.Fatalf("TEST_ENV_FILE=%s not found: %v", ef, err)
+			t.Fatalf("TEST_ENV_FILE=%s not found: %v\nPlease create the file or run scripts/test-integration.sh to generate a .env.ci from .env.ci.example", ef, err)
 		}
 	} else {
 		envPaths := []string{".env", filepath.Join("..", ".env"), filepath.Join("..", "..", ".env")}
@@ -33,6 +33,16 @@ func prepareDBForTest(t *testing.T) *sql.DB {
 				}
 				break
 			}
+		}
+		required := []string{"POSTGRES_HOST", "POSTGRES_PORT", "POSTGRES_USER", "POSTGRES_PASSWORD", "POSTGRES_DB"}
+		missing := []string{}
+		for _, k := range required {
+			if os.Getenv(k) == "" {
+				missing = append(missing, k)
+			}
+		}
+		if len(missing) > 0 {
+			t.Fatalf("missing required environment variables: %v\nSet them in the environment or create a .env.ci from .env.ci.example and run scripts/test-integration.sh", missing)
 		}
 	}
 
