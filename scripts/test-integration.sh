@@ -60,7 +60,10 @@ done
 
 echo "Postgres is accepting connections. Running integration tests..."
 
-TEST_ENV_FILE="$ROOT_DIR/$ENV_FILE" go test -tags=integration ./internal/repository -v
+# Build the test binary and run it from the repo root so relative paths (migrations/) resolve correctly.
+TMP_TEST_BIN=$(mktemp -u)/repo_integration.test
+go test -c -tags=integration -o "$TMP_TEST_BIN" ./internal/repository
+TEST_ENV_FILE="$ROOT_DIR/$ENV_FILE" "$TMP_TEST_BIN" -test.v
 RC=$?
 
 if [ $RC -eq 0 ]; then
@@ -75,4 +78,5 @@ else
   echo "Tests failed (exit $RC). Leaving test services running for inspection." >&2
 fi
 
+rm -f "$TMP_TEST_BIN" || true
 exit $RC
