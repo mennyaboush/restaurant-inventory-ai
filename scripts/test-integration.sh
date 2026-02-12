@@ -4,8 +4,8 @@ set -euo pipefail
 ROOT_DIR=$(cd "$(dirname "$0")/.." && pwd)
 cd "$ROOT_DIR"
 
-ENV_FILE=.env.ci
-EXAMPLE_FILE=.env.ci.example
+ENV_FILE=.env
+EXAMPLE_FILE=.env.example
 
 if [ ! -f "$ENV_FILE" ]; then
   if [ -f "$EXAMPLE_FILE" ]; then

@@ -22,7 +22,7 @@ jobs:
           --health-cmd "pg_isready -U postgres" --health-interval 10s --health-timeout 5s --health-retries 5
 
     env:
-      TEST_ENV_FILE: .env.ci
+      TEST_ENV_FILE: .env
       POSTGRES_HOST: localhost
       POSTGRES_PORT: 5432
       POSTGRES_USER: postgres
@@ -40,9 +40,9 @@ jobs:
         with:
           go-version: '1.25.6'
 
-      - name: Create .env.ci
+      - name: Create .env (placeholders)
         run: |
-          cat > .env.ci <<EOF
+          cat > .env <<EOF
           POSTGRES_HOST=localhost
           POSTGRES_PORT=5432
           POSTGRES_USER=postgres
@@ -77,11 +77,8 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y docker-compose
 
-      - name: Generate .env.ci
-        run: scripts/test-integration.sh
-
-      - name: Copy .env.ci to .env
-        run: cp .env.ci .env
+      - name: Generate .env (from .env.example if present)
+        run: bash scripts/test-integration.sh
 
       - name: Wait for Postgres
         run: |
