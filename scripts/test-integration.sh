@@ -60,7 +60,7 @@ done
 
 echo "Postgres is accepting connections. Running integration tests..."
 
-TEST_ENV_FILE="$ENV_FILE" go test -tags=integration ./internal/repository -v
+TEST_ENV_FILE="$ROOT_DIR/$ENV_FILE" go test -tags=integration ./internal/repository -v
 RC=$?
 
 if [ $RC -eq 0 ]; then
