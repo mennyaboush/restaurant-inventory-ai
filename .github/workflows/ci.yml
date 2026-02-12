@@ -72,6 +72,11 @@ jobs:
         run: |
           golangci-lint run ./...
 
+      - name: Install docker-compose
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y docker-compose
+
       - name: Generate .env.ci
         run: scripts/test-integration.sh
 
