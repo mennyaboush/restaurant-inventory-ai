@@ -22,7 +22,7 @@ jobs:
           --health-cmd "pg_isready -U postgres" --health-interval 10s --health-timeout 5s --health-retries 5
 
     env:
-      TEST_ENV_FILE: .env.ci
+      TEST_ENV_FILE: .env
       POSTGRES_HOST: localhost
       POSTGRES_PORT: 5432
       POSTGRES_USER: postgres
@@ -32,11 +32,36 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Set up Go
         uses: actions/setup-go@v4
         with:
           go-version: '1.25.6'
+
+      - name: Create .env from secrets
+        run: |
+          cat > .env <<EOF
+          POSTGRES_HOST=localhost
+          POSTGRES_PORT=5432
+          POSTGRES_USER=${{ secrets.POSTGRES_USER }}
+          POSTGRES_PASSWORD=${{ secrets.POSTGRES_PASSWORD }}
+          POSTGRES_DB=${{ secrets.POSTGRES_DB }}
+          EOF
+
+      - name: Install golangci-lint (build with local Go)
+        run: |
+          go install github.com/golangci/golangci-lint/cmd/golangci-lint@v1.62.0
+          export PATH=$(go env GOPATH)/bin:$PATH
+
+      - name: Run gitleaks (secrets scan)
+        uses: gitleaks/gitleaks-action@v2
+        with:
+          args: --redact --exit-on-find
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        # note: this uses the open-source gitleaks scanner; it fails the job on findings
 
       - name: Install golangci-lint (build with local Go)
         run: |
@@ -47,20 +72,14 @@ jobs:
         run: |
           golangci-lint run ./...
 
+      - name: Install docker-compose
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y docker-compose
+
+      - name: Generate .env (from .env.example if present)
+        run: bash scripts/test-integration.sh
+
       - name: Wait for Postgres
         run: |
           for i in {1..30}; do pg_isready -h localhost -p 5432 && break || sleep 1; done
-
-      - name: Create .env.ci
-        run: |
-          cat > .env.ci <<EOF
-          POSTGRES_HOST=localhost
-          POSTGRES_PORT=5432
-          POSTGRES_USER=postgres
-          POSTGRES_PASSWORD=postgres
-          POSTGRES_DB=testdb
-          EOF
-
-      - name: Run integration tests
-        run: |
-          go test -tags=integration ./internal/repository -v
