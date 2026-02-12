@@ -57,6 +57,8 @@ jobs:
         uses: zricethezav/gitleaks-action@v2
         with:
           args: --redact --exit-on-find
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         # note: this uses the open-source gitleaks scanner; it fails the job on findings
 
       - name: Install golangci-lint (build with local Go)
