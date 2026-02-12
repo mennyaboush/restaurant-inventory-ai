@@ -80,6 +80,9 @@ jobs:
       - name: Generate .env.ci
         run: scripts/test-integration.sh
 
+      - name: Copy .env.ci to .env
+        run: cp .env.ci .env
+
       - name: Wait for Postgres
         run: |
           for i in {1..30}; do pg_isready -h localhost -p 5432 && break || sleep 1; done
