@@ -54,9 +54,9 @@ jobs:
           export PATH=$(go env GOPATH)/bin:$PATH
 
       - name: Run gitleaks (secrets scan)
-        uses: zricethezav/gitleaks-action@v2
+        uses: gitleaks/gitleaks-action@v2
         with:
-          args: --redact --exit-on-find
+          extra-args: --redact --exit-on-find
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         # note: this uses the open-source gitleaks scanner; it fails the job on findings
