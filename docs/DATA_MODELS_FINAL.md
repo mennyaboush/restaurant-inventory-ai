@@ -1,321 +1,418 @@
-# 📊 Updated Data Models (Final)
+# 📊 Data Models (Production Implementation)
 
-Based on design review discussions.
+**Status:** ✅ Implemented in PostgreSQL  
+**Migration Files:** `migrations/001_*.sql`, `migrations/002_*.sql`
 
 ---
 
-## Stock Movement - Updated
+## Design Philosophy
+
+**KISS Principle:** Keep It Simple, Stupid
+
+- One product per size/variant (no nested structures)
+- Boxes + Units tracking (simple and clear)
+- Audit trail for every movement (who did what)
+
+---
+
+## Product Model
+
+### Schema
 
 ```sql
-STOCK_MOVEMENT
-├── id (UUID)                    -- Unique identifier
-├── product_id (FK → Product)    -- What product
-├── performed_by (FK → User)     -- WHO actually did the action (Yosef)
-├── reported_by (FK → User)      -- WHO logged it (Manager)
-├── type (enum)                  -- IN/OUT/WASTE/ADJUSTMENT
-├── boxes_change (int)           -- +5 or -2
-├── units_change (int)           -- +10 or -3
-├── reason (string, nullable)    -- "Expired", "Damaged", etc.
-├── notes (string, nullable)     -- Free text
-└── created_at (timestamp)       -- When logged
+CREATE TABLE products (
+    id VARCHAR(50) PRIMARY KEY,              -- "PROD-001", "PROD-002"
+    name VARCHAR(255) NOT NULL,              -- "קוקה קולה 330 פחית"
+    brand VARCHAR(100) NOT NULL,             -- "Coca Cola"
+    size INTEGER NOT NULL CHECK (size > 0), -- 330 (ml), 1500 (ml)
+    container_type VARCHAR(50) NOT NULL,     -- "can", "bottle", "bag"
+    box_size INTEGER DEFAULT 0 CHECK (box_size >= 0),  -- 24, 6, null/0
+    price DECIMAL(10,2) NOT NULL CHECK (price >= 0),   -- 45.00 NIS
+    category VARCHAR(50) NOT NULL,           -- "drinks", "vegetables"
+    is_active BOOLEAN DEFAULT TRUE,          -- Soft delete flag
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
 
--- Example:
--- Manager reports that Yosef took 2 boxes of cola
-INSERT INTO stock_movements (
-    product_id,
-    performed_by,      -- Yosef's user_id
-    reported_by,       -- Manager's user_id
-    type,              -- 'OUT'
-    boxes_change,      -- -2
-    units_change,      -- 0
-    notes              -- 'לקח לאירוע'
+-- Unique constraint: Brand + Size + ContainerType
+CREATE UNIQUE INDEX idx_products_unique 
+ON products (brand, size, container_type);
+
+-- Performance indexes
+CREATE INDEX idx_products_category ON products (category);
+CREATE INDEX idx_products_active ON products (is_active);
+```
+
+### Go Model
+
+```go
+type Product struct {
+    ID            string  // "PROD-001"
+    Name          string  // "קוקה קולה 330 פחית"
+    Brand         string  // "Coca Cola"
+    Size          int     // 330 (ml)
+    ContainerType string  // "can", "bottle", "bag"
+    BoxSize       int     // 24, 6, 0 (if no box)
+    Price         float64 // 45.00 (NIS)
+    Category      string  // "drinks", "vegetables"
+    IsActive      bool    // true
+}
+```
+
+### Categories (MVP)
+
+```go
+const (
+    CategoryDrinks     = "drinks"
+    CategoryVegetables = "vegetables"
+    CategoryBasics     = "basics"
+    CategoryDairy      = "dairy"
+    CategoryPackaging  = "packaging"
 )
+
+var CategoryNames = map[string]string{
+    CategoryDrinks:     "משקאות",
+    CategoryVegetables: "ירקות",
+    CategoryBasics:     "מוצרים בסיסיים",
+    CategoryDairy:      "מוצרי חלב",
+    CategoryPackaging:  "אריזות",
+}
+```
+
+### Examples
+
+| ID | Name | Brand | Size | Container | BoxSize | Category |
+|----|------|-------|------|-----------|---------|----------|
+| PROD-001 | קוקה קולה קטנה | Coca Cola | 330 | can | 24 | drinks |
+| PROD-002 | קוקה קולה גדולה | Coca Cola | 1500 | plastic | 6 | drinks |
+| PROD-003 | עגבניות | - | 1000 | - | 0 | vegetables |
+| PROD-004 | קמח | Five Stars | 1000 | bag | 0 | basics |
+
+---
+
+## Stock Model
+
+### Schema
+
+```sql
+CREATE TABLE stocks (
+    product_id VARCHAR(50) PRIMARY KEY,
+    quantity_boxes INTEGER DEFAULT 0 CHECK (quantity_boxes >= 0),
+    quantity_units INTEGER DEFAULT 0 CHECK (quantity_units >= 0),
+    min_stock INTEGER DEFAULT 0 CHECK (min_stock >= 0),
+    last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (product_id) REFERENCES products(id)
+);
+
+-- Index for low stock queries
+CREATE INDEX idx_stocks_min ON stocks (min_stock);
+```
+
+### Go Model
+
+```go
+type Stock struct {
+    ProductID     string
+    QuantityBoxes int       // Full unopened boxes
+    QuantityUnits int       // Loose items (from opened box)
+    MinStock      int       // Alert threshold (in units)
+    LastUpdated   time.Time
+}
+
+// TotalUnits calculates total inventory
+func (s *Stock) TotalUnits(boxSize int) int {
+    return (s.QuantityBoxes * boxSize) + s.QuantityUnits
+}
+
+// IsLowStock checks if reorder needed
+func (s *Stock) IsLowStock(boxSize int) bool {
+    return s.TotalUnits(boxSize) < s.MinStock
+}
+```
+
+### Examples
+
+| Product | Boxes | Units | BoxSize | Total | MinStock | Low? |
+|---------|-------|-------|---------|-------|----------|------|
+| Cola Small | 3 | 12 | 24 | 84 | 48 | ❌ |
+| Cola Large | 1 | 3 | 6 | 9 | 12 | ✅ |
+| Tomatoes | 0 | 5 | 0 | 5 kg | 10 | ✅ |
+
+---
+
+## Stock Movement Model
+
+### Schema
+
+```sql
+CREATE TABLE stock_movements (
+    id VARCHAR(50) PRIMARY KEY,
+    product_id VARCHAR(50) NOT NULL,
+    type VARCHAR(20) NOT NULL,               -- IN, OUT, WASTE, ADJUSTMENT
+    boxes INTEGER DEFAULT 0,                 -- ±5
+    units INTEGER DEFAULT 0,                 -- ±12
+    performed_by VARCHAR(100) NOT NULL,      -- WHO did it
+    reported_by VARCHAR(100) NOT NULL,       -- WHO logged it
+    reason TEXT,                              -- Optional explanation
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (product_id) REFERENCES products(id)
+);
+
+-- Performance indexes
+CREATE INDEX idx_movements_product ON stock_movements (product_id);
+CREATE INDEX idx_movements_type ON stock_movements (type);
+CREATE INDEX idx_movements_created ON stock_movements (created_at DESC);
+```
+
+### Go Model
+
+```go
+type StockMovement struct {
+    ID          string
+    ProductID   string
+    Type        string    // "IN", "OUT", "WASTE", "ADJUSTMENT"
+    Boxes       int       // +5 or -2
+    Units       int       // +10 or -3
+    PerformedBy string    // WHO did the physical action
+    ReportedBy  string    // WHO logged it in system
+    Reason      string    // Optional
+    CreatedAt   time.Time
+}
+
+// Movement types
+const (
+    MovementIn         = "IN"
+    MovementOut        = "OUT"
+    MovementWaste      = "WASTE"
+    MovementAdjustment = "ADJUSTMENT"
+)
+```
+
+### Examples
+
+| ID | Product | Type | Boxes | Units | PerformedBy | ReportedBy | Reason |
+|----|---------|------|-------|-------|-------------|------------|--------|
+| MOV-001 | PROD-001 | IN | +5 | 0 | Owner | Owner | Delivery received |
+| MOV-002 | PROD-001 | OUT | -1 | -5 | Yosef | Manager | Sold to customer |
+| MOV-003 | PROD-003 | WASTE | 0 | -2 | Manager | Manager | Expired |
+| MOV-004 | PROD-002 | ADJUSTMENT | 0 | +3 | Owner | Owner | Count correction |
+
+### Who Tracking (IMPORTANT)
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                    TWO-PERSON TRACKING                          │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                 │
+│  performed_by: WHO physically did the action                   │
+│  reported_by:  WHO entered it in the system                    │
+│                                                                 │
+│  Case 1: Manager logs that Yosef took items                    │
+│  ├── performed_by: "Yosef"                                     │
+│  └── reported_by: "Manager"                                    │
+│                                                                 │
+│  Case 2: Owner receives delivery themselves                    │
+│  ├── performed_by: "Owner"                                     │
+│  └── reported_by: "Owner" (same person)                        │
+│                                                                 │
+│  WHY? Accountability and audit trail                           │
+│                                                                 │
+└─────────────────────────────────────────────────────────────────┘
 ```
 
 ### Query Examples
 
 ```sql
--- Everything Yosef took this week
+-- All movements for a product
 SELECT * FROM stock_movements 
-WHERE performed_by = 'yosef_id' 
-  AND type = 'OUT'
-  AND created_at > NOW() - INTERVAL '7 days';
+WHERE product_id = 'PROD-001' 
+ORDER BY created_at DESC;
 
--- Who reported this suspicious movement?
-SELECT u.name as reporter 
+-- What did Yosef take this week?
+SELECT p.name, m.boxes, m.units, m.created_at
 FROM stock_movements m
-JOIN users u ON m.reported_by = u.id
-WHERE m.id = 'movement_id';
+JOIN products p ON m.product_id = p.id
+WHERE m.performed_by = 'Yosef'
+  AND m.type = 'OUT'
+  AND m.created_at > NOW() - INTERVAL '7 days';
 
--- Self-reported vs manager-reported
+-- Total waste this month (for analytics)
 SELECT 
-    CASE WHEN performed_by = reported_by THEN 'Self' ELSE 'Manager' END as report_type,
-    COUNT(*) 
-FROM stock_movements 
-GROUP BY 1;
+    p.category,
+    SUM((m.boxes * p.box_size) + m.units) as total_wasted
+FROM stock_movements m
+JOIN products p ON m.product_id = p.id
+WHERE m.type = 'WASTE'
+  AND m.created_at >= DATE_TRUNC('month', NOW())
+GROUP BY p.category;
 ```
 
 ---
 
-## Notification Queue - Persistent
-
-```
-┌─────────────────────────────────────────────────────────────────────────┐
-│                    NOTIFICATION RELIABILITY                             │
-├─────────────────────────────────────────────────────────────────────────┤
-│                                                                         │
-│  REQUIREMENT:                                                          │
-│  If notification service is down, notifications should WAIT            │
-│  and be sent when service is back up (not lost!)                       │
-│                                                                         │
-│  SOLUTION: Persistent Queue                                            │
-│                                                                         │
-│  Option A: Redis with AOF persistence                                  │
-│  ├── Writes to disk every second                                       │
-│  └── Survives restart                                                  │
-│                                                                         │
-│  Option B: PostgreSQL as queue (simpler)                               │
-│  ├── notification_queue table                                          │
-│  ├── status: pending/sent/failed                                       │
-│  └── 100% persistent (it's in the database)                            │
-│                                                                         │
-│  FOR MVP: PostgreSQL queue (simpler, reliable)                         │
-│  LATER: Redis/RabbitMQ if we need higher throughput                    │
-│                                                                         │
-└─────────────────────────────────────────────────────────────────────────┘
-```
-
-### Notification Queue Table
-
-```sql
-NOTIFICATION_QUEUE
-├── id (UUID)
-├── type (enum)               -- 'push' / 'whatsapp' / 'email'
-├── recipient_id (FK → User)  -- Who should receive
-├── title (string)            -- "מלאי נמוך"
-├── body (text)               -- "קולה קטנה - נשארו 12 בקבוקים"
-├── data (jsonb)              -- Additional data for the notification
-├── status (enum)             -- 'pending' / 'sent' / 'failed'
-├── attempts (int)            -- How many times we tried
-├── last_attempt_at (timestamp)
-├── sent_at (timestamp, null) -- When successfully sent
-├── created_at (timestamp)
-└── error (text, null)        -- Last error message if failed
-```
-
-### Flow
-
-```
-1. Stock becomes low
-   ↓
-2. Inventory Service creates notification in queue
-   INSERT INTO notification_queue (status='pending', ...)
-   ↓
-3. Notification Service picks up pending notifications
-   SELECT * FROM notification_queue WHERE status='pending'
-   ↓
-4. If send succeeds → status='sent', sent_at=NOW()
-   If send fails → attempts++, status='pending' (retry later)
-   If too many failures → status='failed', alert admin
-```
-
----
-
-## Full Data Model (Updated)
+## Entity Relationship Diagram
 
 ```mermaid
 erDiagram
-    CATEGORY {
-        uuid id PK
-        string name "משקאות"
-        string name_en "Drinks"
-        int sort_order
-        timestamp created_at
-        timestamp updated_at
-    }
-    
     PRODUCT {
-        uuid id PK
-        uuid category_id FK
-        string name "קוקה קולה 330 פחית"
-        string name_en "Coca Cola 330ml Can"
-        string brand "Coca Cola"
-        string size "330ml"
-        string container_type "can/plastic/glass"
-        string unit_type "bottle/kg/piece"
-        int box_size "24 (nullable)"
-        int default_expiry_days "365"
-        int min_stock_level "48"
-        text[] keywords "search keywords"
-        boolean is_active "true"
-        timestamp created_at
-        timestamp updated_at
+        varchar id PK
+        varchar name
+        varchar brand
+        int size
+        varchar container_type
+        int box_size
+        decimal price
+        varchar category
+        boolean is_active
     }
     
     STOCK {
-        uuid id PK
-        uuid product_id FK
+        varchar product_id PK
         int quantity_boxes
         int quantity_units
-        date expiry_date "nullable"
-        timestamp updated_at
+        int min_stock
+        timestamp last_updated
     }
     
     STOCK_MOVEMENT {
-        uuid id PK
-        uuid product_id FK
-        uuid performed_by FK "who did the action"
-        uuid reported_by FK "who logged it"
-        string type "IN/OUT/WASTE/ADJUSTMENT"
-        int boxes_change
-        int units_change
-        string reason "nullable"
-        string notes "nullable"
+        varchar id PK
+        varchar product_id FK
+        varchar type
+        int boxes
+        int units
+        varchar performed_by
+        varchar reported_by
+        text reason
         timestamp created_at
-    }
-    
-    USER {
-        uuid id PK
-        string email
-        string phone
-        string name
-        string password_hash
-        string role "owner/manager/employee"
-        string language "he/en"
-        boolean is_active
-        timestamp created_at
-        timestamp updated_at
-    }
-    
-    NOTIFICATION_QUEUE {
-        uuid id PK
-        string type "push/whatsapp/email"
-        uuid recipient_id FK
-        string title
-        text body
-        jsonb data
-        string status "pending/sent/failed"
-        int attempts
-        timestamp last_attempt_at
-        timestamp sent_at
-        timestamp created_at
-        text error
-    }
-    
-    SUPPLIER {
-        uuid id PK
-        string name
-        string phone
-        string email
-        string contact_method "phone/app/whatsapp"
-        decimal min_order_value
-        text[] delivery_days
-        text notes
-        boolean is_active
-        timestamp created_at
-    }
-    
-    PRODUCT_SUPPLIER {
-        uuid id PK
-        uuid product_id FK
-        uuid supplier_id FK
-        decimal price_per_unit
-        string unit_type "box/kg/piece"
-        int min_quantity
-        boolean is_preferred
-        timestamp last_updated
     }
 
-    CATEGORY ||--o{ PRODUCT : contains
     PRODUCT ||--o| STOCK : has
     PRODUCT ||--o{ STOCK_MOVEMENT : tracks
-    USER ||--o{ STOCK_MOVEMENT : "performed_by"
-    USER ||--o{ STOCK_MOVEMENT : "reported_by"
-    USER ||--o{ NOTIFICATION_QUEUE : receives
-    PRODUCT ||--o{ PRODUCT_SUPPLIER : "supplied by"
-    SUPPLIER ||--o{ PRODUCT_SUPPLIER : supplies
 ```
 
 ---
 
-## AI Conversation Flow - Updated
+## Future Tables (Not Yet Implemented)
 
-```
-┌─────────────────────────────────────────────────────────────────────────┐
-│  Manager: "יוסף לקח 2 ארגזים קולה גדולה"                                │
-├─────────────────────────────────────────────────────────────────────────┤
-│                                                                         │
-│  AI Parse:                                                             │
-│  ├── WHO: יוסף (employee name)                                         │
-│  ├── ACTION: לקח (took = OUT)                                          │
-│  ├── QUANTITY: 2 ארגזים (2 boxes)                                      │
-│  └── PRODUCT: קולה גדולה (search products)                              │
-│                                                                         │
-│  AI Search Products:                                                   │
-│  ├── Found: "קוקה קולה 1.5L פלסטיק" (in stock: 5 boxes)               │
-│  └── Only one match for "קולה גדולה"                                    │
-│                                                                         │
-│  AI Confirm:                                                           │
-│  "יוסף לקח 2 ארגזים קוקה קולה 1.5L פלסטיק. נכון?"                       │
-│  [כן ✓] [לא, משהו אחר]                                                  │
-│                                                                         │
-│  Manager: [כן ✓]                                                        │
-│                                                                         │
-│  AI Action:                                                            │
-│  INSERT INTO stock_movements (                                         │
-│      product_id: 'cola-large-plastic-id',                              │
-│      performed_by: 'yosef-user-id',    ← Yosef                        │
-│      reported_by: 'manager-user-id',   ← The manager reporting        │
-│      type: 'OUT',                                                      │
-│      boxes_change: -2                                                  │
-│  )                                                                      │
-│                                                                         │
-│  AI Response:                                                          │
-│  "עדכנתי ✓ יוסף: -2 ארגזים קולה גדולה. נשארו 3 ארגזים במלאי."          │
-│                                                                         │
-└─────────────────────────────────────────────────────────────────────────┘
+### Users (Phase 2)
+
+```sql
+CREATE TABLE users (
+    id VARCHAR(50) PRIMARY KEY,
+    email VARCHAR(255) UNIQUE NOT NULL,
+    password_hash VARCHAR(255) NOT NULL,
+    name VARCHAR(255) NOT NULL,
+    role VARCHAR(20) NOT NULL,  -- 'owner', 'manager', 'employee'
+    is_active BOOLEAN DEFAULT TRUE,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
 ```
 
----
+### Categories (Phase 2)
 
-## Your Computer - Ollama Optimization
-
+```sql
+CREATE TABLE categories (
+    id VARCHAR(50) PRIMARY KEY,
+    name VARCHAR(100) NOT NULL,
+    name_en VARCHAR(100),
+    sort_order INTEGER DEFAULT 0,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
 ```
-┌─────────────────────────────────────────────────────────────────────────┐
-│                    OLLAMA ON OLD COMPUTER                               │
-├─────────────────────────────────────────────────────────────────────────┤
-│                                                                         │
-│  SMALL MODELS (your computer can handle):                              │
-│  ├── llama3.2:1b (1.3GB) ← Currently installed                        │
-│  ├── phi3:mini (2.2GB)                                                 │
-│  └── gemma2:2b (1.6GB)                                                 │
-│                                                                         │
-│  IF COMPUTER STRUGGLES:                                                │
-│  ├── Use OpenAI API for development too                               │
-│  ├── Cost: ~$1-5 per month for development                            │
-│  └── Much faster responses                                             │
-│                                                                         │
-│  TIPS FOR OLD COMPUTER:                                                │
-│  ├── Close other apps when using Ollama                                │
-│  ├── Use smaller context (shorter conversations)                       │
-│  └── Run: ollama run llama3.2:1b --verbose                            │
-│      (see if it's using CPU or GPU)                                    │
-│                                                                         │
-│  CHECK YOUR SPECS:                                                     │
-│  sysctl -n machdep.cpu.brand_string  ← CPU                            │
-│  system_profiler SPHardwareDataType | grep Memory  ← RAM              │
-│                                                                         │
-└─────────────────────────────────────────────────────────────────────────┘
+
+### Suppliers (Phase 3)
+
+```sql
+CREATE TABLE suppliers (
+    id VARCHAR(50) PRIMARY KEY,
+    name VARCHAR(255) NOT NULL,
+    phone VARCHAR(50),
+    email VARCHAR(255),
+    notes TEXT,
+    is_active BOOLEAN DEFAULT TRUE,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
 ```
 
 ---
 
-## ✅ Updated Understanding
+## Best Practices
 
-| Requirement | Design Decision |
-|-------------|-----------------|
-| Track who did it vs who reported | `performed_by` + `reported_by` fields |
-| Don't lose notifications | PostgreSQL queue with pending/sent/failed status |
-| Old computer | Use small model (1b), can switch to OpenAI if needed |
-| AI must understand context | Parse employee name, action, quantity, product |
-| Always confirm before changing | AI asks for confirmation on every change |
+### ID Generation
+
+```go
+// Use simple sequential IDs for MVP
+func GenerateProductID() string {
+    // PROD-001, PROD-002, etc.
+    return fmt.Sprintf("PROD-%03d", nextID)
+}
+
+// Later: Use UUIDs for distributed systems
+// return uuid.New().String()
+```
+
+### Timestamps
+
+- Always use UTC in database
+- Convert to local timezone in frontend
+- PostgreSQL: `TIMESTAMP` (not WITH TIME ZONE for simplicity)
+
+### Soft Deletes
+
+- Never DELETE products (breaks history)
+- Use `is_active = FALSE` instead
+- Filter inactive products in queries: `WHERE is_active = TRUE`
+
+### NULL Handling
+
+```go
+// Go SQL package: use sql.NullString for nullable fields
+type Product struct {
+    Reason sql.NullString  // Can be NULL in database
+}
+
+// Check if value exists
+if product.Reason.Valid {
+    fmt.Println(product.Reason.String)
+}
+```
+
+---
+
+## Testing Data
+
+### Seed Data for Development
+
+```sql
+-- Products
+INSERT INTO products VALUES 
+('PROD-001', 'קוקה קולה 330 פחית', 'Coca Cola', 330, 'can', 24, 45.00, 'drinks', TRUE, NOW(), NOW()),
+('PROD-002', 'קוקה קולה 1.5L פלסטיק', 'Coca Cola', 1500, 'plastic', 6, 8.50, 'drinks', TRUE, NOW(), NOW()),
+('PROD-003', 'עגבניות', 'Local', 1000, '', 0, 6.00, 'vegetables', TRUE, NOW(), NOW());
+
+-- Stock
+INSERT INTO stocks VALUES
+('PROD-001', 5, 12, 48, NOW()),
+('PROD-002', 2, 0, 12, NOW()),
+('PROD-003', 0, 8, 10, NOW());
+
+-- Movements
+INSERT INTO stock_movements VALUES
+('MOV-001', 'PROD-001', 'IN', 5, 0, 'Owner', 'Owner', 'Initial stock', NOW()),
+('MOV-002', 'PROD-001', 'OUT', 0, 12, 'Owner', 'Owner', 'Sales', NOW());
+```
+
+---
+
+## Summary
+
+| Model | Status | Tables | Purpose |
+|-------|--------|--------|---------|
+| **Product** | ✅ Implemented | products | Catalog of items |
+| **Stock** | ✅ Implemented | stocks | Current inventory levels |
+| **Movement** | ✅ Implemented | stock_movements | Audit trail |
+| **User** | ⬜ Future | users | Authentication |
+| **Category** | ⬜ Future | categories | Organized grouping |
+| **Supplier** | ⬜ Future | suppliers | Vendor management |
+
+**Current Focus:** Get the core 3 models working perfectly before adding more complexity.

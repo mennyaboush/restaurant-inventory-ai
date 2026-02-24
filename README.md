@@ -97,31 +97,36 @@ This project is designed to teach:
 - Project structure best practices
 
 ### 2. AI Engineering
+### 2. Go Programming **[IN PROGRESS]**
+- HTTP servers and REST APIs ✅
+- Database interactions (PostgreSQL) ✅
+- Error handling patterns ✅
+- Project structure best practices ✅
+- Testing (unit + integration) ⬜
+
+### 3. Databases **[IN PROGRESS]**
+- PostgreSQL fundamentals ✅
+- Data modeling ✅
+- Migrations ✅
+- SQL queries ✅
+- Transactions ⬜
+
+### 4. Frontend Development **[NEXT]**
+- HTML/JavaScript/CSS
+- REST API consumption
+- Mobile-responsive design
+- Hebrew RTL layout
+
+### 5. AI Engineering **[FUTURE]**
 - LLM API integration (OpenAI, Ollama)
 - RAG (Retrieval Augmented Generation)
-- Embeddings and vector search
+- Natural language understanding
 - Prompt engineering
-- AI application patterns
 
-### 3. Databases
-- PostgreSQL fundamentals
-- Data modeling
-- Migrations
-- Vector databases (Qdrant)
-
-### 4. Containers & Kubernetes
+### 6. Containers & Kubernetes **[FUTURE]**
 - Docker and Dockerfiles
-- Multi-stage builds
 - Kubernetes deployments
-- Services, ConfigMaps, Secrets
-- Persistent storage
-
-### 5. Linux & DevOps
-- Command line proficiency
-- Shell scripting
-- Logging and monitoring
-- Debugging techniques
-- CI/CD basics
+- Production deployment
 
 ---
 
@@ -129,79 +134,220 @@ This project is designed to teach:
 
 ```
 restaurant-inventory-ai/
-│
-├── README.md                    ← You are here
-├── PROJECT_STORY.md             ← Why and how we built this
-├── LEARNING_JOURNEY.md          ← Track learning progress
-│
-├── docs/                        ← Documentation
-│   ├── 01_ARCHITECTURE.md       ← System design
-│   ├── 02_API_DESIGN.md         ← API specifications
-│   ├── 03_DATABASE_SCHEMA.md    ← Data models
-│   ├── 04_AI_FEATURES.md        ← AI/RAG design
-│   └── 05_DEPLOYMENT.md         ← Production guide
-│
-├── learning/                    ← Learning materials
-│   ├── 01_go_basics/            ← Go tutorials
-│   ├── 02_api_development/      ← REST API lessons
-│   ├── 03_databases/            ← SQL & PostgreSQL
-│   ├── 04_docker/               ← Container lessons
-│   ├── 05_ai_engineering/       ← AI/ML/RAG lessons
-│   └── 06_kubernetes/           ← K8s lessons
-│
-├── backend/                     ← Go API (will build)
-├── frontend/                    ← Web UI (will build)
-├── ai-service/                  ← AI/RAG service (will build)
-├── kubernetes/                  ← K8s manifests (will build)
-└── docker-compose.yaml          ← Local development
+├── cmd/
+│   ├── server/main.go          ← Main application entry
+│   └── dev/main.go             ← Dev utilities
+├── internal/
+│   ├── api/api.go              ← HTTP handlers
+│   ├── models/product.go       ← Data structures
+│   ├── repository/             ← Database layer
+│   │   ├── repository.go       ← Interface
+│   │   ├── postgres_store.go   ← PostgreSQL implementation
+│   │   └── memory_store.go     ← In-memory (testing)
+│   └── service/service.go      ← Business logic (future)
+├── config/
+│   └── config.go               ← Configuration loading
+├── migrations/
+│   ├── 001_create_products_table.sql
+│   └── 002_create_stock_tables.sql
+├── docs/
+│   ├── REQUIREMENTS.md         ← Product requirements
+│   ├── ARCHITECTURE.md         ← System architecture
+│   ├── DATA_MODELS_FINAL.md    ← Database models
+│   └── DECISIONS.md            ← Design decisions
+├── learn/
+│   └── 01_basics/              ← Learning exercises
+├── .env                        ← Environment config
+├── docker-compose.yml          ← PostgreSQL setup
+├── go.mod                      ← Go dependencies
+└── README.md                   ← You are here
 ```
 
 ---
 
-## 🚀 Quick Links
+## 🚀 Quick Start
 
-- [📋 Learning Journey](LEARNING_JOURNEY.md) - Track your progress
-- [🏗️ Architecture](docs/01_ARCHITECTURE.md) - System design
-- [🔌 API Design](docs/02_API_DESIGN.md) - Endpoints
-- [💾 Database Schema](docs/03_DATABASE_SCHEMA.md) - Data models
-- [🤖 AI Features](docs/04_AI_FEATURES.md) - RAG & predictions
+### Prerequisites
+- Go 1.21+
+- Docker Desktop
+- Git
+
+### Setup
+
+```bash
+# Clone the repository
+git clone https://github.com/yourusername/restaurant-inventory-ai.git
+cd restaurant-inventory-ai
+
+# Start PostgreSQL
+docker-compose up -d postgres
+
+# Set environment variables
+export $(cat .env | xargs)
+
+# Run the server
+go run cmd/server/main.go
+
+# Test the API
+curl http://localhost:8080/products
+```
+
+### Development Commands
+
+```bash
+# Run tests
+go test ./...
+
+# Run integration tests
+go test ./internal/repository/ -tags=integration
+
+# Check database
+docker exec -it postgres-inventory psql -U postgres -d inventory
+
+# View logs
+docker-compose logs -f postgres
+```
 
 ---
 
-## 🛠️ Tech Stack
+## 📚 Documentation
 
-| Layer | Technology | Why |
-|-------|------------|-----|
-| **Backend** | Go | Fast, simple, great for APIs |
-| **Database** | PostgreSQL | Reliable, feature-rich |
-| **Vector DB** | Qdrant | Fast vector search for RAG |
-| **AI/LLM** | Ollama + OpenAI | Local dev + production |
-| **Frontend** | HTML/JS (HTMX) | Simple, fast to learn |
-| **Containers** | Docker | Industry standard |
-| **Orchestration** | Kubernetes | Production-grade deployment |
-| **Cache** | Redis | Fast data access |
+- [📋 Requirements](docs/REQUIREMENTS.md) - What we're building
+- [🏗️ Architecture](docs/ARCHITECTURE.md) - How it's structured
+- [💾 Data Models](docs/DATA_MODELS_FINAL.md) - Database schema
+- [🎯 Decisions](docs/DECISIONS.md) - Design choices
+- [📖 Learning Journey](LEARNING_JOURNEY.md) - Progress tracking
+- [🎯 Work Plan](WORK_PLAN.md) - Weekly schedule
 
 ---
 
-## 💰 Cost Estimates
+## 🛠️ Tech Stack (MVP)
+
+| Layer | Technology | Status |
+|-------|------------|--------|
+| **Backend** | Go 1.21 | ✅ Working |
+| **Database** | PostgreSQL 16 | ✅ Working |
+| **Router** | Chi | ✅ Working |
+| **Frontend** | HTML/JS | ⬜ Next |
+| **Auth** | JWT | ⬜ Next |
+| **Deploy** | VPS/K8s | ⬜ Future |
+
+### Future Additions
+- **AI/LLM:** Ollama/OpenAI for chat
+- **Cache:** Redis for sessions
+- **Vector DB:** pgvector for RAG
+- **Mobile:** PWA or native app
+
+---
+
+## 📊 Current Status
+
+### ✅ Completed (Week 1-3)
+- [x] Go project setup
+- [x] Data models (Product, Stock, StockMovement)
+- [x] PostgreSQL database setup
+- [x] Migrations
+- [x] REST API (products CRUD)
+- [x] Stock operations API
+- [x] Repository pattern with interface
+
+### 🔄 In Progress (Week 3-4)
+- [ ] Movement history API
+- [ ] Basic authentication
+- [ ] Input validation
+- [ ] Error handling improvements
+
+### ⬜ Next Steps (Week 4-6)
+- [ ] Web frontend UI
+- [ ] Hebrew language support
+- [ ] Low stock alerts
+- [ ] User management
+- [ ] Deploy to production
+
+---
+
+## 💡 Learning Approach
+
+**Philosophy:** Learn by building something real
+
+1. **Start Simple:** Basic CRUD API with PostgreSQL
+2. **Iterate:** Add features one at a time
+3. **Understand Why:** Every decision is documented
+4. **Production Ready:** Not just a toy project
+5. **Best Practices:** Industry-standard patterns
+
+**Weekly Structure:**
+- Monday-Friday: Learning + coding (2-3 hours/day)
+- Weekend: Review, refactor, plan next week
+
+---
+
+## � MVP Deployment Cost
 
 ### Development (FREE)
 Everything runs locally on your machine.
 
-### Production Options
+### Production MVP Options
 
-| Option | Monthly Cost | Notes |
-|--------|--------------|-------|
-| **Budget** | ~$30-50 | VPS + managed DB + OpenAI |
-| **Self-Hosted AI** | ~$20 + hardware | Mini PC at restaurant |
-| **Full Cloud** | ~$80-120 | Managed K8s + all services |
+| Option | Monthly Cost | What You Get |
+|--------|--------------|--------------|
+| **VPS (Recommended)** | $6-12 | DigitalOcean/Hetzner droplet, PostgreSQL, Nginx |
+| **Platform-as-a-Service** | $0-10 | Railway.app or Render.com (free tier available) |
+| **Self-Hosted** | ~$5 | Raspberry Pi at restaurant + domain |
+
+### Future Costs (v2.0+)
+- **AI (OpenAI API):** ~$10-30/month for natural language features
+- **WhatsApp Business API:** ~$20/month + per-message fees
+- **Kubernetes Cluster:** ~$20-50/month (DigitalOcean Kubernetes)
+
+**MVP Strategy:** Start with free/cheap VPS, add features and costs gradually.
 
 ---
 
-## 👨‍💻 Author
+## 🎯 Roadmap
 
-Built as a learning project with a real-world purpose.
+### Phase 1: MVP (Weeks 1-6) **[IN PROGRESS]**
+- [x] Database setup
+- [x] Product management API
+- [x] Stock tracking API
+- [ ] Web interface
+- [ ] Basic authentication
+- [ ] Deploy to production
+
+### Phase 2: Enhanced Features (Weeks 7-10)
+- [ ] Movement history
+- [ ] Low stock alerts
+- [ ] Multi-user support (Manager/Employee roles)
+- [ ] Hebrew language UI
+- [ ] PWA (works offline)
+
+### Phase 3: AI Features (Weeks 11-14)
+- [ ] Natural language input
+- [ ] Smart suggestions
+- [ ] Demand prediction
+- [ ] Auto-ordering suggestions
+
+### Phase 4: Advanced (Future)
+- [ ] Supplier management
+- [ ] Recipe costing
+- [ ] POS integration
+- [ ] Multiple locations
 
 ---
 
-*Let's build something amazing! 🚀*
+## 🤝 Contributing
+
+This is a learning project with a real user (restaurant owner). 
+
+**Suggestions Welcome:**
+- Open an issue to discuss features
+- Share your own learning journey
+- Suggest improvements to documentation
+
+---
+
+## 📝 License
+
+MIT License - Feel free to learn from and adapt this project.
+
+---
