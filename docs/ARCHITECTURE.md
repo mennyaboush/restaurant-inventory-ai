@@ -1,455 +1,413 @@
-# 🏗️ System Architecture (MVP)
+# 🏗️ Inventory System Architecture
 
 ## Overview
 
-**Architecture Pattern:** Monolithic application (for now)
-**Reason:** Simpler to build, debug, and deploy for MVP
+**Current architecture:** Modular monolith in Go
 
-Future: Can split into microservices when scaling requirements emerge.
+**Reason:** Keep the inventory MVP simple to build, debug, test and deploy while preserving clean domain boundaries for future integrations.
+
+This repository is the **Inventory domain** of a larger long-term product vision: **AI Store Manager**. The inventory application must remain independently useful and deterministic. AI systems consume inventory capabilities through explicit APIs/tools; they do not own inventory state or access the database directly.
+
+See [`AI_STORE_MANAGER_VISION.md`](./AI_STORE_MANAGER_VISION.md) for the broader product direction.
 
 ---
 
-## High-Level Architecture (Current/MVP)
+## Architecture Principles
+
+1. **Start simple.** Do not introduce distributed systems without a concrete need.
+2. **Inventory is the source of truth for inventory.** LLM state is never authoritative stock state.
+3. **Business rules belong in the service/domain layer.** HTTP handlers and future AI tools are adapters.
+4. **Persistence is hidden behind repository interfaces.**
+5. **Important stock changes are auditable.**
+6. **AI actions use the same validated business operations as human/API actions.**
+7. **Split into services only when scaling, deployment, reliability or ownership requirements justify it.**
+
+---
+
+## Current / Near-Term Architecture
 
 ```mermaid
 flowchart TB
-    subgraph Clients["📱 Clients"]
-        Mobile["Mobile Browser<br/>(iPhone/iPad)"]
-        Desktop["Desktop Browser"]
+    subgraph Clients[Clients / Adapters]
+        Mobile[Mobile / Web UI]
+        HTTP[REST API]
+        FutureAI[Future AI Tool Adapter]
     end
 
-    subgraph Server["🖥️ Application Server (Go)"]
-        API["REST API<br/>(Chi Router)"]
-        Auth["Auth Middleware<br/>(JWT)"]
-        Service["Business Logic"]
-        Repo["Repository Layer"]
+    subgraph App[Inventory Application - Go]
+        API[HTTP Handlers / Chi]
+        Tools[AI Tool Adapter - Future]
+        Service[Inventory Service / Business Logic]
+        Repo[Repository Interfaces]
     end
 
-    subgraph Data["💾 Data Layer"]
+    subgraph Data[Data]
         PostgreSQL[(PostgreSQL)]
     end
 
-    Mobile --> API
-    Desktop --> API
-    API --> Auth
-    Auth --> Service
+    Mobile --> HTTP
+    HTTP --> API
+    FutureAI --> Tools
+    API --> Service
+    Tools --> Service
     Service --> Repo
     Repo --> PostgreSQL
 ```
 
-## Request Flow
+### Current Implementation Note
+
+The first MVP intentionally implemented a simple `API → Repository` path for product CRUD. This was useful for learning and for getting a working vertical slice quickly.
+
+As inventory behavior becomes richer, the application evolves toward:
+
+```text
+HTTP / AI tools
+      ↓
+Inventory Service
+      ↓
+Repository
+      ↓
+PostgreSQL
+```
+
+This is an incremental evolution, not a rewrite requirement.
+
+---
+
+## Request / Action Flow
+
+A normal API request:
 
 ```mermaid
 sequenceDiagram
     participant Client
     participant API
-    participant Auth
-    participant Service
+    participant Service as Inventory Service
+    participant Repo as Repository
     participant DB as PostgreSQL
 
-    Client->>API: POST /api/products
-    API->>Auth: Validate JWT token
-    Auth-->>API: User verified
-    API->>Service: CreateProduct(data)
-    Service->>Service: Validate input
-    Service->>DB: INSERT INTO products
-    DB-->>Service: Product created
-        uuid id PK
-    Service-->>API: Success response
-    API-->>Client: 201 Created + product data
+    Client->>API: inventory operation
+    API->>Service: validated command/input
+    Service->>Service: apply business rules
+    Service->>Repo: persistence operation
+    Repo->>DB: transaction / query
+    DB-->>Repo: result
+    Repo-->>Service: domain result
+    Service-->>API: result
+    API-->>Client: response
 ```
 
----
-
-## Data Model (Current Implementation)
+A future AI action follows the same business path:
 
 ```mermaid
-erDiagram
-    PRODUCT {
-        varchar id PK "PROD-001"
-        varchar name "קוקה קולה 330 פחית"
-        varchar brand "Coca Cola"
-        int size "330ml"
-        varchar container_type "can"
-        int box_size "24"
-        decimal price "45.00"
-        varchar category "drinks"
-        boolean is_active "true"
-        timestamp created_at
-        timestamp updated_at
-    }
-    
-    STOCK {
-        varchar product_id PK
-        int quantity_boxes "3"
-        int quantity_units "12"
-        int min_stock "48"
-        timestamp last_updated
-    }
-    
-    STOCK_MOVEMENT {
-        varchar id PK
-        varchar product_id FK
-        varchar type "IN|OUT|WASTE|ADJUSTMENT"
-        int boxes "±5"
-        int units "±12"
-        varchar performed_by "Who did it"
-        varchar reported_by "Who logged it"
-        text reason "Optional"
-        timestamp created_at
-    }
-    
-    USER {
-        varchar id PK
-        varchar email
-        varchar password_hash
-        varchar name
-        varchar role "owner"
-        boolean is_active
-        timestamp created_at
-    }
+sequenceDiagram
+    participant User
+    participant Agent as AI Store Manager
+    participant Tool as Inventory Tool
+    participant Service as Inventory Service
+    participant DB as PostgreSQL
 
-    PRODUCT ||--o| STOCK : has
-    PRODUCT ||--o{ STOCK_MOVEMENT : tracks
+    User->>Agent: "We received 3 boxes of Coke"
+    Agent->>Agent: resolve product and quantity
+    Agent->>Tool: receive_stock(product, boxes=3)
+    Tool->>Service: ReceiveStock(...)
+    Service->>Service: validate business rules
+    Service->>DB: atomic stock update + movement
+    DB-->>Service: committed
+    Service-->>Tool: updated stock
+    Tool-->>Agent: result
+    Agent-->>User: confirmation
 ```
 
-### Key Design Decisions
-
-1. **Product = Unique Variant**
-   - "Coca Cola 330ml Can" is ONE product
-   - "Coca Cola 1.5L Plastic" is DIFFERENT product
-   - No complex nested variants
-
-2. **Stock Tracking: Boxes + Units**
-   - `quantity_boxes`: Full, unopened boxes
-   - `quantity_units`: Loose items from opened box
-   - Total = (boxes × box_size) + units
-
-3. **Movement Audit Trail**
-   - Every change logged
-   - `performed_by`: WHO did the physical action
-   - `reported_by`: WHO logged it in system
-   - Enables accountability
+If product, quantity, unit or operation is ambiguous, the AI must clarify before performing a stock mutation.
 
 ---
 
-## Project Structure
+## Inventory Domain Model
 
+### Product
+
+A product represents one concrete sellable/stockable variant.
+
+Examples:
+
+- Coca Cola 330ml can
+- Coca Cola 1.5L bottle
+- Coca Cola Zero 330ml can
+
+These are separate products rather than variants hidden inside one product object.
+
+### Stock
+
+Tracks the current inventory level for a product.
+
+For boxed goods:
+
+```text
+total units = quantity_boxes × box_size + quantity_units
 ```
-restaurant-inventory-ai/
-├── cmd/
-│   └── server/
-│       └── main.go                 # Application entry point
-├── internal/
-│   ├── api/
-│   │   └── api.go                  # HTTP handlers
-│   ├── models/
-│   │   └── product.go              # Data structures
-│   ├── repository/
-│   │   ├── repository.go           # Interface
-│   │   ├── memory_store.go         # In-memory (testing)
-│   │   └── postgres_store.go       # PostgreSQL implementation
-│   └── service/
-│       └── service.go              # Business logic (future)
-├── config/
-│   └── config.go                   # Configuration loading
-├── migrations/
-│   ├── 001_create_products_table.sql
-│   └── 002_create_stock_tables.sql
-├── docs/
-│   ├── REQUIREMENTS.md
-│   ├── ARCHITECTURE.md             # This file
-│   ├── DATA_MODELS_FINAL.md
-│   └── DECISIONS.md
-├── learn/                          # Learning exercises
-│   └── 01_basics/
-├── .env                            # Environment variables
-├── docker-compose.yml              # PostgreSQL setup
-├── go.mod
-└── README.md
+
+The domain can later evolve to support weighted goods, batches and expiration dates without requiring the AI layer to understand persistence details.
+
+### Stock Movement
+
+Every meaningful inventory change should become an auditable movement.
+
+Movement types currently include:
+
+```text
+IN
+OUT
+WASTE
+ADJUSTMENT
 ```
+
+Important metadata includes:
+
+- product
+- quantity change
+- movement type
+- who physically performed the action
+- who/system reported the action
+- reason
+- timestamp
+
+Future metadata may include source system, AI agent/tool invocation ID, supplier/order reference and location.
 
 ---
 
-## Tech Stack (MVP)
+## Inventory Operations
 
-| Layer | Technology | Why |
-|-------|------------|-----|
-| **Language** | Go 1.21+ | Fast, simple, great for APIs |
-| **Web Framework** | Chi | Lightweight router, middleware support |
-| **Database** | PostgreSQL 16 | Reliable, ACID transactions |
-| **ORM** | None (raw SQL) | Learn SQL, full control, no magic |
-| **Auth** | JWT | Stateless, standard |
-| **Frontend** | HTML + JS (or React) | Simple start, can upgrade later |
-| **Deployment** | Docker + VPS | Simple and cheap for MVP |
+Prefer domain-oriented operations over exposing arbitrary database-style updates.
+
+Target service operations include:
+
+```text
+SearchProducts(query)
+GetStock(productID)
+GetLowStock()
+ReceiveStock(...)
+ConsumeStock(...)
+RecordWaste(...)
+AdjustStock(...)
+GetMovements(...)
+SynchronizeInventory(...)
+```
+
+These operations can later be exposed as REST endpoints, internal calls, or AI tools while sharing the same validation and transaction logic.
 
 ---
 
-## API Endpoints (Current)
+## API Direction
 
 ### Products
 
-```
-GET    /products              # List all products
-GET    /products/:id          # Get one product
-POST   /products              # Create product
-PUT    /products/:id          # Update product
-DELETE /products/:id          # Delete product (soft delete)
+```text
+GET    /products
+GET    /products/:id
+POST   /products
+PUT    /products/:id
+DELETE /products/:id
 ```
 
 ### Stock
 
-```
-GET    /stock/:productId      # Get stock for product
-PUT    /stock/:productId      # Update stock (add/remove)
-```
-
-### Movements (Future)
-
-```
-GET    /movements             # List all movements
-GET    /movements/:productId  # Movements for product
-POST   /movements             # Create movement
+```text
+GET    /stock/:productId
+GET    /stock/low
 ```
 
-### Auth (Future)
+### Stock Operations / Movements
 
+```text
+POST   /movements
+GET    /movements
+GET    /movements/:productId
 ```
-POST   /auth/login            # Login
-POST   /auth/register         # Register (owner only initially)
-POST   /auth/logout           # Logout
-GET    /auth/me               # Current user info
+
+The exact external API may evolve. The important contract is the inventory service/domain behavior beneath it.
+
+### Authentication
+
+Future:
+
+```text
+POST   /auth/login
+POST   /auth/register
+POST   /auth/logout
+GET    /auth/me
 ```
+
+Authorization will later distinguish owners, managers, employees and trusted system/agent identities.
 
 ---
 
-## Deployment Architecture (MVP)
+## Relationship to AI Store Manager
 
-```
-┌─────────────────────────────────────────┐
-│  Domain: inventory.restaurant.com       │
-└─────────────────────────────────────────┘
-              ↓ HTTPS
-┌─────────────────────────────────────────┐
-│  Nginx (Reverse Proxy + SSL)            │
-└─────────────────────────────────────────┘
-              ↓
-┌─────────────────────────────────────────┐
-│  Go Application (Port 8080)             │
-│  - Serves API                           │
-│  - Serves static files (HTML/JS/CSS)    │
-└─────────────────────────────────────────┘
-              ↓
-┌─────────────────────────────────────────┐
-│  PostgreSQL (Port 5432)                 │
-│  - Local or managed (DigitalOcean DB)   │
-└─────────────────────────────────────────┘
+The larger system is expected to contain multiple bounded domains/capabilities:
+
+```mermaid
+flowchart LR
+    Agent[AI Store Manager]
+    Inventory[Inventory]
+    Orders[Orders / POS]
+    Employees[Employees / Shifts]
+    Comms[Phone / WhatsApp]
+    Physical[Store Events / Cameras / Speakers]
+
+    Agent --> Inventory
+    Agent --> Orders
+    Agent --> Employees
+    Agent --> Comms
+    Agent --> Physical
 ```
 
-### Deployment Option 1: Single VPS
+This repository owns **Inventory**.
 
-**Provider:** DigitalOcean, Linode, Hetzner
-**Cost:** ~$6-12/month
-**Setup:**
-```bash
-# Install Go, PostgreSQL, Nginx
-# Deploy binary
-# Run as systemd service
-```
+It should not grow into a single codebase containing telephony, computer vision, employee scheduling and every future AI Store Manager capability merely because those capabilities interact with stock.
 
-**Pros:** Simple, cheap, full control
-**Cons:** Manual updates, no auto-scaling
-
-### Deployment Option 2: Docker Compose
-
-```yaml
-version: '3.8'
-services:
-  app:
-    image: restaurant-inventory:latest
-    ports:
-      - "8080:8080"
-    depends_on:
-      - postgres
-    environment:
-      - POSTGRES_HOST=postgres
-  
-  postgres:
-    image: postgres:16
-    volumes:
-      - pgdata:/var/lib/postgresql/data
-    environment:
-      - POSTGRES_PASSWORD=secret
-```
-
-**Pros:** Easy to deploy, reproducible
-**Cons:** Still needs server management
-
-### Deployment Option 3: Platform as a Service
-
-**Provider:** Railway.app, Render.com, Fly.io
-**Cost:** Free tier available, then ~$5-10/month
-**Setup:** Connect Git repo, auto-deploy on push
-
-**Pros:** Easiest, auto-deployments, SSL included
-**Cons:** Less control, vendor lock-in
-
-### Deployment Option 4: Kubernetes (Future)
-
-For learning purposes, can deploy to:
-- Minikube (local)
-- k3s (lightweight K8s)
-- DigitalOcean Kubernetes
-- Google GKE free tier
-
-**When:** After MVP works, for learning K8s concepts
+The orchestrating AI can combine information from multiple domains while each domain retains ownership of its own rules and data.
 
 ---
 
-## Future Evolution Path
+## AI Integration Contract
 
-### Phase 2: Add Microservices Gradually
+The future AI layer should receive narrow, explicit tools such as:
 
-```
-Current (Monolith):
-┌────────────────────┐
-│  Single Go App     │
-│  - API             │
-│  - Business Logic  │
-└────────────────────┘
-        ↓
-┌────────────────────┐
-│  PostgreSQL        │
-└────────────────────┘
-
-Future (Microservices):
-┌────────────────────┐     ┌────────────────────┐
-│  Inventory Service │     │  AI Service        │
-│  (Go)              │     │  (Go/Python)       │
-└────────────────────┘     └────────────────────┘
-        ↓                          ↓
-┌────────────────────┐     ┌────────────────────┐
-│  PostgreSQL        │     │  Vector DB         │
-└────────────────────┘     └────────────────────┘
+```text
+inventory.search_products(query)
+inventory.get_stock(product_id)
+inventory.get_low_stock()
+inventory.receive_stock(...)
+inventory.consume_stock(...)
+inventory.record_waste(...)
+inventory.adjust_stock(...)
+inventory.get_movements(...)
 ```
 
-### Phase 3: Add Advanced Features
+The AI must **not** receive unrestricted SQL/database access.
 
-- AI chat interface
-- RAG for product matching
-- Smart suggestions
-- Mobile app (React Native/Flutter)
-- Offline-first PWA
+Benefits:
+
+- deterministic validation
+- authorization boundaries
+- auditability
+- easier testing
+- safer AI behavior
+- ability to replace the AI model without changing inventory rules
 
 ---
 
-## Development Workflow
-
-### Local Development
-
-```bash
-# Terminal 1: Start PostgreSQL
-docker-compose up postgres
-
-# Terminal 2: Run migrations
-# (migrations run automatically on startup)
-
-# Terminal 3: Run server
-export $(cat .env | xargs)
-go run cmd/server/main.go
-
-# Terminal 4: Test API
-curl http://localhost:8080/products
-```
-
-### Testing
-
-```bash
-# Run unit tests
-go test ./internal/models/
-
-# Run integration tests
-go test ./internal/repository/ -tags=integration
-
-# Run all tests
-go test ./...
-```
-
-### Database Migrations
-
-Migrations in `migrations/` folder run automatically via docker-entrypoint.
-For manual migrations:
-```bash
-psql -h localhost -U postgres -d inventory -f migrations/001_xxx.sql
-```
-
----
-
-## Security Considerations (Future)
-
-### MVP (Basic)
-- ✅ HTTPS only (via Nginx or platform)
-- ✅ Password hashing (bcrypt)
-- ✅ JWT tokens
-- ✅ SQL injection prevention (parameterized queries)
-- ✅ CORS configuration
-
-### Production (Enhanced)
-- Rate limiting
-- Input validation
-- CSRF protection
-- Security headers
-- Regular updates
-- Monitoring and logging
-- Database backups
-
----
-
-## Monitoring & Logging (Future)
+## Deployment Strategy
 
 ### MVP
-- Application logs to stdout
-- PostgreSQL logs
-- Nginx access/error logs
 
-### Production
-- Structured logging (JSON)
-- Centralized logging (Loki, ELK)
-- Metrics (Prometheus)
-- Alerting (when errors spike)
-- Uptime monitoring
+Keep deployment inexpensive and understandable:
+
+```text
+HTTPS
+  ↓
+Go inventory application
+  ↓
+PostgreSQL
+```
+
+Docker Compose or a small managed platform/VPS is sufficient for the early pilot.
+
+### Later
+
+Do not move to Kubernetes or microservices solely for architectural purity.
+
+Consider splitting components when there is a concrete reason such as:
+
+- independent scaling requirements
+- separate deployment lifecycle
+- reliability/isolation requirements
+- multiple development teams
+- high-volume asynchronous processing
+- physical-store edge workloads
+
+The AI Store Manager orchestrator may naturally become a separate service before the inventory domain itself needs further decomposition.
 
 ---
 
-## Why Start Simple?
+## Testing Strategy
 
-**Philosophy:** Build MVP first, add complexity when needed.
+### Domain / Service Tests
 
-**Benefits:**
-1. ✅ Faster time to production
-2. ✅ Easier to debug
-3. ✅ Cheaper to run
-4. ✅ Learn basics before advanced patterns
-5. ✅ Real user feedback early
+Test inventory rules without HTTP or PostgreSQL when possible.
 
-**When to Add Complexity:**
-- Microservices: When scaling or team structure requires it
-- Caching: When database queries become slow
-- Message queues: When async processing needed
-- AI features: When core features work well
+Examples:
+
+- cannot consume more stock than available
+- ambiguous/invalid quantities rejected
+- receiving stock increases correct totals
+- waste produces correct movement
+- adjustment requires appropriate reason/actor rules
+
+### Repository Integration Tests
+
+Verify PostgreSQL behavior and transaction semantics.
+
+### API Tests
+
+Verify HTTP mapping, validation and status codes.
+
+### Future AI Contract Tests
+
+AI tests should verify that natural-language requests resolve into safe tool calls. Inventory correctness itself remains covered by deterministic service tests.
+
+---
+
+## Near-Term Roadmap
+
+### Phase 1 — Reliable Inventory Core
+
+- Complete stock operations
+- Persist stock movements
+- Introduce inventory service/business logic where needed
+- Ensure stock mutations and movement records are atomic
+- Improve repository error propagation
+- Add service tests
+- Add inventory synchronization/counting flow
+
+### Phase 2 — Real Store Pilot
+
+- Load real product catalog
+- Mobile-friendly UI
+- Hebrew-first experience
+- Use the system for deliveries, consumption, waste and inventory counts
+- Measure accuracy and operational friction
+
+### Phase 3 — Inventory AI
+
+- Natural-language inventory queries
+- Product matching
+- clarification flow
+- inventory tool calling
+- low-stock summaries
+- suggested purchase lists
+
+### Phase 4 — AI Store Manager Integration
+
+Connect this domain to the broader orchestrator described in `AI_STORE_MANAGER_VISION.md`.
+
+---
+
+## Why Keep It Simple?
+
+The original project philosophy remains valid:
+
+> Build the simplest system that solves the real operational problem, then add complexity only when reality requires it.
+
+The new AI Store Manager vision expands the destination, but it does not invalidate the MVP architecture that got the project started.
 
 ---
 
 ## Summary
 
-**Current State:** Monolithic Go application with PostgreSQL
-**Goal:** Working MVP in 4-6 weeks
-**Future:** Can evolve into microservices architecture with AI capabilities
+**Today:** Go + PostgreSQL inventory application with product CRUD and repository abstractions.
 
-**Next Steps:**
-1. ✅ Complete REST API (Products, Stock, Movements)
-2. ⬜ Add authentication (Users, JWT)
-3. ⬜ Build web interface (HTML + JS or React)
-4. ⬜ Deploy to production
-5. ⬜ Get real user feedback
-6. ⬜ Iterate based on usage
+**Next:** Strengthen stock operations, movements and the service/domain boundary.
+
+**Long term:** This repository becomes the trusted Inventory capability used by the AI Store Manager and other store systems.
