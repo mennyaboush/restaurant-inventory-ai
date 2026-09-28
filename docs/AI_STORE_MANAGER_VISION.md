@@ -84,8 +84,8 @@ Responsibilities:
 
 Future capabilities:
 
-- Answer phone calls in Hebrew
-- Handle WhatsApp or web conversations
+- Answer phone calls in Hebrew or English, based on the customer's language or request
+- Handle WhatsApp or web conversations in Hebrew or English, based on the customer's language or request
 - Answer menu, price and opening-hours questions
 - Take customer orders
 - Check order status
@@ -226,7 +226,7 @@ The existing simple REST API is not considered a mistake. It was an intentional 
 
 Build the first cross-domain agent around a small set of high-value capabilities:
 
-- Hebrew AI phone/customer interaction
+- Hebrew or English AI phone/customer interaction, based on the customer's language or request
 - Order intake
 - Inventory access
 - Simple employee/task awareness
