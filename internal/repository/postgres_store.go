@@ -3,7 +3,8 @@ package repository
 import (
 	"database/sql"
 	"fmt"
-	"strings"\n\t"time"
+	"strings"
+	"time"
 
 	_ "github.com/lib/pq"
 	"github.com/mennyaboush/restaurant-inventory-ai/internal/models"
