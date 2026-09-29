@@ -31,7 +31,7 @@ var (
 type MemoryStore struct {
 	// Maps for O(1) lookup by ID
 	products map[string]*models.Product // productID → Product
-	stock    map[string]*models.Stock   // productID → Stock
+	stock    map[string]*models.Stock   // productID → Stock\n\tmovements []*models.StockMovement
 
 	// Counter for generating IDs
 	nextID int
