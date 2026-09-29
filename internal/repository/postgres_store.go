@@ -254,7 +254,7 @@ func (s *PostgresStore) ApplyStockMovement(movement *models.StockMovement) error
 // ListStockMovements returns newest movements first.
 func (s *PostgresStore) ListStockMovements(productID string, limit int) ([]*models.StockMovement, error) {
 	if limit <= 0 {
-		limit = 100
+		return nil, ErrInvalidLimit
 	}
 
 	query := `SELECT id, product_id, type, boxes, units, performed_by, reported_by, reason, created_at
