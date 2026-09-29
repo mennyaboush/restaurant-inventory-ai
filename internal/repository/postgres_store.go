@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"fmt"
 	"strings"
+	"time"
 
 	_ "github.com/lib/pq"
 	"github.com/mennyaboush/restaurant-inventory-ai/internal/models"
@@ -200,6 +201,92 @@ func (s *PostgresStore) GetLowStockProducts() []*models.Product {
 		res = append(res, &p)
 	}
 	return res
+}
+
+// ApplyStockMovement atomically updates stock and records its audit movement.
+func (s *PostgresStore) ApplyStockMovement(movement *models.StockMovement) error {
+	if err := movement.Validate(); err != nil {
+		return err
+	}
+
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	var currentBoxes, currentUnits int
+	err = tx.QueryRow(`SELECT quantity_boxes, quantity_units FROM stocks WHERE product_id=$1 FOR UPDATE`, movement.ProductID).Scan(&currentBoxes, &currentUnits)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return fmt.Errorf("%w: %s", ErrStockNotFound, movement.ProductID)
+		}
+		return err
+	}
+
+	newBoxes := currentBoxes + movement.Boxes
+	newUnits := currentUnits + movement.Units
+	if newBoxes < 0 || newUnits < 0 {
+		return fmt.Errorf("%w: would result in %d boxes, %d units", ErrInsufficientStock, newBoxes, newUnits)
+	}
+
+	if movement.ID == "" {
+		movement.ID = fmt.Sprintf("MOV-%d", time.Now().UnixNano())
+	}
+	if movement.CreatedAt.IsZero() {
+		movement.CreatedAt = time.Now()
+	}
+
+	if _, err := tx.Exec(`UPDATE stocks SET quantity_boxes=$1, quantity_units=$2, last_updated=CURRENT_TIMESTAMP WHERE product_id=$3`, newBoxes, newUnits, movement.ProductID); err != nil {
+		return err
+	}
+
+	if _, err := tx.Exec(`INSERT INTO stock_movements (id, product_id, type, boxes, units, performed_by, reported_by, reason, created_at)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
+		movement.ID, movement.ProductID, movement.Type, movement.Boxes, movement.Units,
+		movement.PerformedBy, movement.ReportedBy, movement.Reason, movement.CreatedAt); err != nil {
+		return err
+	}
+
+	return tx.Commit()
+}
+
+// ListStockMovements returns newest movements first.
+func (s *PostgresStore) ListStockMovements(productID string, limit int) ([]*models.StockMovement, error) {
+	if limit <= 0 {
+		return nil, ErrInvalidLimit
+	}
+
+	query := `SELECT id, product_id, type, boxes, units, performed_by, reported_by, reason, created_at
+		FROM stock_movements`
+	args := []interface{}{}
+	if productID != "" {
+		query += " WHERE product_id=$1 ORDER BY created_at DESC LIMIT $2"
+		args = append(args, productID, limit)
+	} else {
+		query += " ORDER BY created_at DESC LIMIT $1"
+		args = append(args, limit)
+	}
+
+	rows, err := s.db.Query(query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	movements := make([]*models.StockMovement, 0)
+	for rows.Next() {
+		var movement models.StockMovement
+		if err := rows.Scan(&movement.ID, &movement.ProductID, &movement.Type, &movement.Boxes, &movement.Units,
+			&movement.PerformedBy, &movement.ReportedBy, &movement.Reason, &movement.CreatedAt); err != nil {
+			return nil, err
+		}
+		movements = append(movements, &movement)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return movements, nil
 }
 
 // Ensure PostgresStore implements Repository

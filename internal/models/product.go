@@ -24,7 +24,8 @@ var (
 	ErrStockProductRequired = errors.New("product ID is required for stock")
 
 	// Movement errors
-	ErrMovementInvalidType = errors.New("invalid movement type")
+	ErrMovementProductRequired = errors.New("product ID is required for movement")
+	ErrMovementInvalidType     = errors.New("invalid movement type")
 	ErrMovementNoQuantity  = errors.New("movement must have boxes or units")
 	ErrMovementNoPerformer = errors.New("performed_by is required")
 )
@@ -148,6 +149,10 @@ var ValidMovementTypes = map[string]bool{
 
 // Validate checks if a StockMovement is valid
 func (m *StockMovement) Validate() error {
+	if m.ProductID == "" {
+		return ErrMovementProductRequired
+	}
+
 	// Check movement type
 	if !ValidMovementTypes[m.Type] {
 		return fmt.Errorf("%w: %s", ErrMovementInvalidType, m.Type)
