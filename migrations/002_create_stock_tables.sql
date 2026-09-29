@@ -19,7 +19,6 @@ CREATE TABLE stock_movements (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
-CREATE INDEX idx_stocks_min ON stocks (min_stock);
 CREATE INDEX idx_movements_product ON stock_movements (product_id);
 
 -- +migrate Down
