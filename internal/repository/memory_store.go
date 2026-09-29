@@ -31,7 +31,8 @@ var (
 type MemoryStore struct {
 	// Maps for O(1) lookup by ID
 	products map[string]*models.Product // productID → Product
-	stock    map[string]*models.Stock   // productID → Stock\n\tmovements []*models.StockMovement
+	stock    map[string]*models.Stock   // productID → Stock
+	movements []*models.StockMovement
 
 	// Counter for generating IDs
 	nextID int
@@ -45,7 +46,8 @@ type MemoryStore struct {
 func NewMemoryStore() *MemoryStore {
 	return &MemoryStore{
 		products: make(map[string]*models.Product),
-		stock:    make(map[string]*models.Stock),
+		stock:     make(map[string]*models.Stock),
+		movements: make([]*models.StockMovement, 0),
 		nextID:   1,
 	}
 }
@@ -261,6 +263,60 @@ func (s *MemoryStore) GetLowStockProducts() []*models.Product {
 }
 
 // ============================================
+// STOCK MOVEMENT OPERATIONS
+// ============================================
+
+func (s *MemoryStore) ApplyStockMovement(movement *models.StockMovement) error {
+	if err := movement.Validate(); err != nil {
+		return err
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	stock, exists := s.stock[movement.ProductID]
+	if !exists {
+		return fmt.Errorf("%w: %s", ErrStockNotFound, movement.ProductID)
+	}
+
+	newBoxes := stock.QuantityBoxes + movement.Boxes
+	newUnits := stock.QuantityUnits + movement.Units
+	if newBoxes < 0 || newUnits < 0 {
+		return fmt.Errorf("%w: would result in %d boxes, %d units", ErrInsufficientStock, newBoxes, newUnits)
+	}
+
+	if movement.ID == "" {
+		movement.ID = fmt.Sprintf("MOV-%d", time.Now().UnixNano())
+	}
+	if movement.CreatedAt.IsZero() {
+		movement.CreatedAt = time.Now()
+	}
+
+	stock.QuantityBoxes = newBoxes
+	stock.QuantityUnits = newUnits
+	stock.LastUpdated = time.Now()
+	s.movements = append(s.movements, movement)
+	return nil
+}
+
+func (s *MemoryStore) ListStockMovements(productID string, limit int) ([]*models.StockMovement, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	if limit <= 0 {
+		limit = 100
+	}
+	result := make([]*models.StockMovement, 0)
+	for i := len(s.movements) - 1; i >= 0 && len(result) < limit; i-- {
+		movement := s.movements[i]
+		if productID == "" || movement.ProductID == productID {
+			result = append(result, movement)
+		}
+	}
+	return result, nil
+}
+
+// ============================================
 // UTILITY METHODS
 // ============================================
 
@@ -285,5 +341,6 @@ func (s *MemoryStore) Clear() {
 
 	s.products = make(map[string]*models.Product)
 	s.stock = make(map[string]*models.Stock)
+	s.movements = make([]*models.StockMovement, 0)
 	s.nextID = 1
 }
