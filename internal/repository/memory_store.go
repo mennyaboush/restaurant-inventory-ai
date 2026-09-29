@@ -19,6 +19,7 @@ var (
 	ErrProductExists     = fmt.Errorf("product already exists")
 	ErrStockNotFound     = fmt.Errorf("stock not found")
 	ErrInsufficientStock = fmt.Errorf("insufficient stock")
+	ErrInvalidLimit      = fmt.Errorf("limit must be positive")
 )
 
 // ============================================
@@ -304,7 +305,7 @@ func (s *MemoryStore) ListStockMovements(productID string, limit int) ([]*models
 	defer s.mu.RUnlock()
 
 	if limit <= 0 {
-		limit = 100
+		return nil, ErrInvalidLimit
 	}
 	result := make([]*models.StockMovement, 0)
 	for i := len(s.movements) - 1; i >= 0 && len(result) < limit; i-- {
